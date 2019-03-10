@@ -12,32 +12,34 @@ namespace TestTransactionScope
         static void Main(string[] args)
         {
             var publisher = new Publisher();
-
+            var product = new Product("");
             Console.WriteLine("-- transaction is completed");
             using (var transaction = new TransactionScope())
             {
-                publisher.PublishProduct(new Product("Product A"));
-                publisher.PublishProduct(new Product("Product B"));
+                product.Name = "Product A";
+                publisher.PublishProduct(product);
+                product.Name = "Product B";
+                publisher.PublishProduct(product);
                 Console.WriteLine("--> Commit");
                 transaction.Complete();
             }
 
             Console.WriteLine();
-            Console.WriteLine("transaction is not completed");
+            Console.WriteLine("-- transaction is not completed");
             using (var transaction = new TransactionScope())
             {
                 publisher.PublishProduct(new Product("Product A"));
                 publisher.PublishProduct(new Product("Product B"));
-                Console.WriteLine("--> Commit");
+                Console.WriteLine("--> noCommit");
             }
 
 
             Console.WriteLine();
-            Console.WriteLine("No transaction");
+            Console.WriteLine("-- No transaction");
             {
                 publisher.PublishProduct(new Product("Product A"));
                 publisher.PublishProduct(new Product("Product B"));
-                Console.WriteLine("--> Commit");
+                Console.WriteLine("--> end");
             }
             Console.ReadLine();
 
@@ -47,19 +49,28 @@ namespace TestTransactionScope
 
     public class Publisher : PublisherBase
     {
-
+        new class PublishData : PublisherBase.PublishData
+        {
+            public string TargetQueue { get; set; }
+        }
         public void PublishProduct(Product product)
         {
-            ProcessPublish(product);
+            var data = new PublishData
+            {
+                SerializedContent = product.ToString(),
+                TargetQueue = "Product"
+            };
+            ProcessPublish(data);
         }
 
-        protected override void Publish(string str)
+        protected override void Publish(PublisherBase.PublishData data)
         {
+            var localData = (PublishData)data;
             var color = Console.ForegroundColor;
             Console.ForegroundColor = ConsoleColor.Green;
             try
             {
-                Console.WriteLine(str);
+                Console.WriteLine(localData.TargetQueue + " - "+  localData.SerializedContent);
             }
             finally
             {
@@ -70,9 +81,9 @@ namespace TestTransactionScope
     }
 
     public class Product
-    {
+{
 
-        public Product(string name)
+    public Product(string name)
         {
             Name = name;
         }
@@ -85,21 +96,25 @@ namespace TestTransactionScope
         }
     }
 
-    public abstract class PublisherBase 
-    {
-        private Dictionary<Transaction, List<string>> Transactions = new Dictionary<Transaction, List<string>>();
+    public abstract class PublisherBase
+{
+        protected class PublishData
+        {
+            public string SerializedContent { get; set; }
+        }
+    private Dictionary<Transaction, List<PublishData>> Transactions = new Dictionary<Transaction, List<PublishData>>();
 
-        protected virtual void Publish(string str)
+        protected virtual void Publish(PublishData str)
         {
             Console.WriteLine(str);
         }
 
 
-        protected void ProcessPublish(object product)
+        protected void ProcessPublish(PublishData data)
         {
             if (Transaction.Current == null)
             {
-                Publish(product.ToString());
+                Publish(data);
             }
             else
             {
@@ -107,12 +122,12 @@ namespace TestTransactionScope
                 {
                     if (!Transactions.ContainsKey(Transaction.Current))
                     {
-                        Transactions[Transaction.Current] = new List<string>();
+                        Transactions[Transaction.Current] = new List<PublishData>();
                         Transaction.Current.TransactionCompleted += Current_TransactionCompleted;
                     }
 
                 }
-                Transactions[Transaction.Current].Add(product.ToString());
+                Transactions[Transaction.Current].Add(data);
             }
         }
 
@@ -126,7 +141,7 @@ namespace TestTransactionScope
                     try
                     {
                         if(e.Transaction.TransactionInformation.Status==TransactionStatus.Committed)
-                            Transactions[e.Transaction].ForEach(s => Publish(s.ToString()));
+                            Transactions[e.Transaction].ForEach(s => Publish(s));
                     }
                     finally
                     {
